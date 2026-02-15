@@ -1,46 +1,70 @@
 from pathlib import Path
 import subprocess
 
-NGINX_CONF_PATH = Path("/etc/nginx/sites-enabled/mlops")
+NGINX_SITE_PATH = Path("/etc/nginx/sites-available/mlops")
+NGINX_ENABLED_PATH = Path("/etc/nginx/sites-enabled/mlops")
+UI_ROOT = Path("/var/www/mlops-ui")
 
 
 def write_routes(routes: dict):
     """
-    routes = {
-      "abcd1234": 11001,
-      "xyz99999": 11055
+    routes format:
+    {
+      "control": "http://127.0.0.1:8000/",
+      "models": {
+          "54b2e32b": "http://127.0.0.1:42037/",
+          "683b2426": "http://127.0.0.1:45217/"
+      }
     }
     """
-    lines = []
-    lines.append("server {")
-    lines.append("    listen 80;")
-    lines.append("    server_name _;")
-    lines.append("")
-    lines.append("    client_max_body_size 50M;")
-    lines.append("")
 
-    # control api itself (optional)
-    lines.append("    location /control/ {")
-    lines.append("        proxy_pass http://127.0.0.1:8000/;")
-    lines.append("        proxy_set_header Host $host;")
-    lines.append("        proxy_set_header X-Real-IP $remote_addr;")
-    lines.append("    }")
-    lines.append("")
+    control_upstream = routes.get("control", "http://127.0.0.1:8000/")
+    model_routes = routes.get("models", {})
 
-    for model_id, port in routes.items():
-        lines.append(f"    location /m/{model_id}/ {{")
-        lines.append(f"        proxy_pass http://127.0.0.1:{port}/;")
-        lines.append("        proxy_set_header Host $host;")
-        lines.append("        proxy_set_header X-Real-IP $remote_addr;")
-        lines.append("    }")
-        lines.append("")
+    # Build nginx config
+    conf = f"""
+server {{
+    listen 80;
+    server_name _;
 
-    lines.append("}")
-    content = "\n".join(lines) + "\n"
+    client_max_body_size 50M;
 
-    tmp_path = Path("/tmp/mlops_routes.conf")
-    tmp_path.write_text(content)
+    # ========= UI (ALWAYS ON) =========
+    location / {{
+        root {UI_ROOT};
+        index index.html;
+        try_files $uri $uri/ /index.html;
+    }}
 
-    subprocess.run(["sudo", "cp", str(tmp_path), str(NGINX_CONF_PATH)], check=True)
+    # ========= Control API =========
+    location /control/ {{
+        proxy_pass {control_upstream};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }}
+"""
+
+    # Add model routes
+    for model_id, upstream in model_routes.items():
+        conf += f"""
+    location /m/{model_id}/ {{
+        proxy_pass {upstream};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }}
+"""
+
+    conf += "\n}\n"
+
+    # Write config
+    NGINX_SITE_PATH.write_text(conf)
+
+    # Ensure enabled symlink exists
+    if not NGINX_ENABLED_PATH.exists():
+        subprocess.run(["sudo", "ln", "-s", str(NGINX_SITE_PATH), str(NGINX_ENABLED_PATH)], check=False)
+
+    # Reload nginx safely
     subprocess.run(["sudo", "nginx", "-t"], check=True)
     subprocess.run(["sudo", "systemctl", "reload", "nginx"], check=True)

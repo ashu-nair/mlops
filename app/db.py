@@ -36,5 +36,16 @@ def init_db():
     )
     """)
 
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS metrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        model_id TEXT,
+        version INTEGER,
+        request_time TEXT,
+        latency_ms REAL
+    )
+    """)
+
+
     conn.commit()
     conn.close()
