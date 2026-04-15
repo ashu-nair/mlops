@@ -306,7 +306,11 @@ def deploy(model_id: str):
     conn.commit()
     conn.close()
 
-    refresh_nginx()
+    try:
+      refresh_nginx()
+    except Exception as e:
+      print("⚠️ Nginx refresh failed:", e)
+
 
     return {
         "model_id": model_id,
@@ -552,6 +556,10 @@ def delete_model(model_id: str):
     conn.commit()
     conn.close()
 
-    refresh_nginx()
+    try:
+      refresh_nginx()
+    except Exception as e:
+      print("⚠️ Nginx refresh failed:", e)
+
 
     return {"status": "deleted", "model_id": model_id}
